@@ -3,141 +3,112 @@ import time
 from screener import get_supertrend_signal
 from issi_symbols import ISSI_SYMBOLS
 
-TOKEN = "ISI_TOKEN_KAMU_DISINI"
+TOKEN = "8540062679:AAFfnJF5M2eCYjzPY6hFWX56jHrxDRCNnNw"
 bot = telebot.TeleBot(TOKEN)
 
 # ===============================
-# START MESSAGE
+# START
 # ===============================
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message,
 """Halo👋🏼 aku asisten ALPHA🤖
-aku akan membantumu scan saham yang bagus🚀⚡
 
-Silahkan scan😁
-Pilih salah satu command dibawah yaa😁
+Silahkan scan😁 pilih command:
 
-/buy_strong   → Daily (akurasi tinggi)
-/buy_high     → H4 (swing)
-/strong_buy   → Weekly 🚀
+/buy_strong   → Daily (Supertrend + Stoch)
+/buy_high     → H4
+/strong_buy   → Weekly
 /fastswing_1D → Fast Daily ⚡
 /fastswing_4H → Fast H4 ⚡
 /sniper_entry → ENTRY PALING AKURAT 🎯🔥
 """)
 
 # ===============================
-# CORE SCAN FUNCTION (ANTI DOUBLE)
+# SCAN CORE
 # ===============================
-def scan(symbols, interval, mode="normal"):
+def scan(symbols, interval, mode):
     results = []
     sent = set()
 
     for sym in symbols:
         data = get_supertrend_signal(sym, interval, mode)
 
-        if data and data["symbol"] not in sent:
+        if data and sym not in sent:
             results.append(data["text"])
-            sent.add(data["symbol"])
+            sent.add(sym)
 
     return results
 
 # ===============================
-# SEND MESSAGE PER 1 SAHAM
+# SEND PER SAHAM
 # ===============================
-def kirim_satu_satu(chat_id, results, title):
-    if not results:
+def kirim(chat_id, hasil, title):
+    if not hasil:
         bot.send_message(chat_id, "❌ Tidak ada signal")
         return
 
     bot.send_message(chat_id, title)
 
-    for res in results:
+    for h in hasil:
         try:
-            bot.send_message(chat_id, res)
+            bot.send_message(chat_id, h)
             time.sleep(1)
         except Exception as e:
-            print("Send error:", e)
+            print("Error kirim:", e)
 
 # ===============================
-# DAILY (FILTER KETAT)
+# COMMANDS
 # ===============================
 @bot.message_handler(commands=['buy_strong'])
-def buy_daily(message):
-    bot.reply_to(message, "🔍 Scanning Daily... tunggu ±3 menit 🤗")
+def daily(message):
+    bot.reply_to(message, "🔍 Scanning Daily...")
+    hasil = scan(ISSI_SYMBOLS, "1d", "strict")
+    kirim(message.chat.id, hasil, "🔥 BUY STRONG DAILY")
 
-    hasil = scan(ISSI_SYMBOLS, "1d", mode="strict")
-
-    kirim_satu_satu(message.chat.id, hasil, "🔥 BUY STRONG (DAILY)")
-
-# ===============================
-# H4 (FILTER)
-# ===============================
 @bot.message_handler(commands=['buy_high'])
-def buy_h4(message):
-    bot.reply_to(message, "🔍 Scanning H4... tunggu ±3 menit 🤗")
+def h4(message):
+    bot.reply_to(message, "🔍 Scanning H4...")
+    hasil = scan(ISSI_SYMBOLS, "1h", "strict")
+    kirim(message.chat.id, hasil, "⚡ BUY HIGH H4")
 
-    hasil = scan(ISSI_SYMBOLS, "1h", mode="strict")
-
-    kirim_satu_satu(message.chat.id, hasil, "⚡ BUY HIGH (H4)")
-
-# ===============================
-# WEEKLY (NO FILTER)
-# ===============================
 @bot.message_handler(commands=['strong_buy'])
-def buy_weekly(message):
-    bot.reply_to(message, "🔍 Scanning Weekly... 🤗")
+def weekly(message):
+    bot.reply_to(message, "🔍 Scanning Weekly...")
+    hasil = scan(ISSI_SYMBOLS, "1wk", "weekly")
+    kirim(message.chat.id, hasil, "🚀 WEEKLY TREND")
 
-    hasil = scan(ISSI_SYMBOLS, "1wk", mode="fast")
-
-    kirim_satu_satu(message.chat.id, hasil, "🚀 STRONG BUY WEEKLY")
-
-# ===============================
-# FAST DAILY
-# ===============================
 @bot.message_handler(commands=['fastswing_1D'])
-def fast_daily(message):
-    bot.reply_to(message, "🔍 Fast Scan Daily... ⚡")
+def fast_d(message):
+    bot.reply_to(message, "🔍 Fast Scan Daily...")
+    hasil = scan(ISSI_SYMBOLS, "1d", "fast")
+    kirim(message.chat.id, hasil, "⚡ FAST DAILY")
 
-    hasil = scan(ISSI_SYMBOLS, "1d", mode="fast")
-
-    kirim_satu_satu(message.chat.id, hasil, "⚡ FAST SWING DAILY")
-
-# ===============================
-# FAST H4
-# ===============================
 @bot.message_handler(commands=['fastswing_4H'])
-def fast_h4(message):
-    bot.reply_to(message, "🔍 Fast Scan H4... ⚡")
+def fast_h(message):
+    bot.reply_to(message, "🔍 Fast Scan H4...")
+    hasil = scan(ISSI_SYMBOLS, "1h", "fast")
+    kirim(message.chat.id, hasil, "⚡ FAST H4")
 
-    hasil = scan(ISSI_SYMBOLS, "1h", mode="fast")
-
-    kirim_satu_satu(message.chat.id, hasil, "⚡ FAST SWING H4")
-
-# ===============================
-# SNIPER ENTRY (MULTI TF)
-# ===============================
 @bot.message_handler(commands=['sniper_entry'])
-def sniper_entry(message):
-    bot.reply_to(message, "🎯 Sniper Entry Scan... (1H + H4 + Daily) 🔥")
+def sniper(message):
+    bot.reply_to(message, "🎯 Sniper Entry Scan...")
 
     results = []
     sent = set()
 
     for sym in ISSI_SYMBOLS:
-        d1 = get_supertrend_signal(sym, "1d", "strict")
+        d = get_supertrend_signal(sym, "1d", "strict")
         h4 = get_supertrend_signal(sym, "1h", "strict")
-        h1 = get_supertrend_signal(sym, "1h", "strict")
 
-        if d1 and h4 and h1:
-            if sym not in sent:
-                results.append(d1["text"])
-                sent.add(sym)
+        if d and h4 and sym not in sent:
+            results.append(d["text"])
+            sent.add(sym)
 
-    kirim_satu_satu(message.chat.id, results, "🎯 SNIPER ENTRY 🔥")
+    kirim(message.chat.id, results, "🎯 SNIPER ENTRY")
 
 # ===============================
-# RUN BOT (ANTI ERROR 409)
+# RUN BOT
 # ===============================
 while True:
     try:
