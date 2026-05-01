@@ -1,38 +1,22 @@
 import yfinance as yf
 import pandas as pd
-import numpy as np
-import warnings
-
-warnings.filterwarnings("ignore")
-
-# ===============================
-# CLEAN SYMBOL
-# ===============================
-def clean_symbol(symbol):
-    return symbol.replace(".JK","")
 
 # ===============================
 # STOCHASTIC
 # ===============================
-def stochastic(df, k_period=10, d_period=5, smooth_k=5):
-    low_min = df["Low"].rolling(k_period).min()
-    high_max = df["High"].rolling(k_period).max()
-
-    k_fast = 100 * (df["Close"] - low_min) / (high_max - low_min)
-    k_smooth = k_fast.rolling(smooth_k).mean()
-    d_line = k_smooth.rolling(d_period).mean()
-
-    return k_smooth, d_line
+def stochastic(df):
+    low_min = df["Low"].rolling(10).min()
+    high_max = df["High"].rolling(10).max()
+    k = 100 * (df["Close"] - low_min) / (high_max - low_min)
+    k = k.rolling(5).mean()
+    d = k.rolling(5).mean()
+    return k, d
 
 # ===============================
 # SUPERTREND
 # ===============================
-def supertrend(df, period=2, multiplier=1):
-    df = df.copy()
-
-    high = df['High'].astype(float)
-    low = df['Low'].astype(float)
-    close = df['Close'].astype(float)
+def supertrend(df):
+    high, low, close = df['High'], df['Low'], df['Close']
 
     tr = pd.concat([
         high - low,
@@ -40,66 +24,29 @@ def supertrend(df, period=2, multiplier=1):
         (low - close.shift()).abs()
     ], axis=1).max(axis=1)
 
-    atr = tr.ewm(alpha=1/period, adjust=False).mean()
+    atr = tr.ewm(alpha=1/2, adjust=False).mean()
 
     hl2 = (high + low) / 2
-    upper = hl2 + multiplier * atr
-    lower = hl2 - multiplier * atr
-
-    final_upper = upper.copy()
-    final_lower = lower.copy()
-
-    for i in range(1, len(df)):
-        if upper.iloc[i] < final_upper.iloc[i-1] or close.iloc[i-1] > final_upper.iloc[i-1]:
-            final_upper.iloc[i] = upper.iloc[i]
-        else:
-            final_upper.iloc[i] = final_upper.iloc[i-1]
-
-        if lower.iloc[i] > final_lower.iloc[i-1] or close.iloc[i-1] < final_lower.iloc[i-1]:
-            final_lower.iloc[i] = lower.iloc[i]
-        else:
-            final_lower.iloc[i] = final_lower.iloc[i-1]
+    upper = hl2 + atr
+    lower = hl2 - atr
 
     trend = [1]
 
     for i in range(1, len(df)):
-        if close.iloc[i] > final_upper.iloc[i-1]:
+        if close.iloc[i] > upper.iloc[i-1]:
             trend.append(1)
-        elif close.iloc[i] < final_lower.iloc[i-1]:
+        elif close.iloc[i] < lower.iloc[i-1]:
             trend.append(-1)
         else:
             trend.append(trend[i-1])
 
-    df['trend'] = trend
+    df["trend"] = trend
     return df
 
 # ===============================
-# FORMAT OUTPUT
+# GET DATA
 # ===============================
-def format_output(data):
-    value_fmt = f"{data['value']:,}".replace(",", ".")
-    volume_fmt = f"{data['volume']:,}"
-
-    return (
-        f"╔══════════════════════╗\n"
-        f"🎯 {data['symbol']}\n"
-        f"╠══════════════════════╣\n"
-        f"💰 Harga   : {data['close']}\n"
-        f"📊 + Bumbu : {data['k']}\n"
-        f"📊 + Bumbu : {data['d']}\n"
-        f"📊 Volume  : {volume_fmt}\n"
-        f"💵 Value   : Rp {value_fmt}\n"
-        f"💰 Bandar  : {data['bandar']}\n"
-        f"🎯 Score   : {data['score']}\n"
-        f"🏷 Label   : {data['label']}\n"
-        f"📈 Chart   : https://stockbit.com/symbol/{data['clean']}?chart=1\n"
-        f"╚══════════════════════╝"
-    )
-
-# ===============================
-# MAIN SIGNAL
-# ===============================
-def get_supertrend_signal(symbol, interval="1d", mode="normal"):
+def get_data(symbol, interval):
     try:
         df = yf.download(symbol, period="3mo", interval=interval, progress=False)
 
@@ -111,138 +58,113 @@ def get_supertrend_signal(symbol, interval="1d", mode="normal"):
 
         df = df[['High','Low','Close','Volume']].dropna()
 
-        # FIX H4
-        if interval == "1h":
-            df = df.iloc[::4]
+        if len(df) < 20:
+            return None
 
         df["K"], df["D"] = stochastic(df)
         df = supertrend(df)
 
-        if len(df) < 10:
-            return None
-
-        close = float(df["Close"].iloc[-1])
-        volume = int(df["Volume"].iloc[-1])
-        value = int(close * volume)
-
-        k = float(df["K"].iloc[-1]) if not np.isnan(df["K"].iloc[-1]) else 50
-        d = float(df["D"].iloc[-1]) if not np.isnan(df["D"].iloc[-1]) else 50
-
-        curr = df['trend'].iloc[-1]
-
-        recent_flip = False
-        for i in range(-5, -1):
-            if df['trend'].iloc[i-1] == -1 and df['trend'].iloc[i] == 1:
-                recent_flip = True
-
-        avg_vol = df["Volume"].rolling(20).mean().iloc[-1]
-        bandar = "✅ MASUK" if volume > avg_vol * 1.5 else "❌"
-
-        score = 0
-        if recent_flip: score += 40
-        if curr == 1: score += 30
-        if bandar == "✅ MASUK": score += 30
-
-        if mode == "fast":
-            if not recent_flip: return None
-            label = "⚡ FAST BUY"
-
-        elif mode == "strong":
-            if curr != 1: return None
-            label = "🚀 UPTREND"
-
-        else:
-            if not (recent_flip and k < 25 and d < 25):
-                return None
-            label = "🔥 SMART MONEY"
-
-        return {
-            "symbol": symbol,
-            "clean": clean_symbol(symbol),
-            "close": round(close,2),
-            "volume": volume,
-            "value": value,
-            "k": round(k,2),
-            "d": round(d,2),
-            "label": label,
-            "bandar": bandar,
-            "score": score,
-            "text": format_output({
-                "symbol": symbol,
-                "clean": clean_symbol(symbol),
-                "close": round(close,2),
-                "volume": volume,
-                "value": value,
-                "k": round(k,2),
-                "d": round(d,2),
-                "label": label,
-                "bandar": bandar,
-                "score": score
-            })
-        }
-
-    except Exception as e:
-        print(symbol, "error:", e)
+        return df
+    except:
         return None
 
 # ===============================
-# SNIPER ENTRY (MULTI TF)
+# BANDAR DETECTION
 # ===============================
-def get_sniper_signal(symbol):
-    try:
-        df_d = yf.download(symbol, period="3mo", interval="1d", progress=False)
-        df_h4 = yf.download(symbol, period="1mo", interval="1h", progress=False)
-        df_h1 = yf.download(symbol, period="7d", interval="1h", progress=False)
+def bandar_detect(df):
+    avg_vol = df["Volume"].rolling(20).mean().iloc[-1]
+    vol_now = df["Volume"].iloc[-1]
 
-        if df_d.empty or df_h4.empty or df_h1.empty:
-            return None
+    if vol_now > avg_vol * 1.5:
+        return True
+    return False
 
-        for df in [df_d, df_h4, df_h1]:
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+# ===============================
+# SCORE SYSTEM
+# ===============================
+def calculate_score(df, new_trend):
+    score = 0
 
-        df_d = df_d[['High','Low','Close','Volume']].dropna()
-        df_h4 = df_h4[['High','Low','Close','Volume']].dropna().iloc[::4]
-        df_h1 = df_h1[['High','Low','Close','Volume']].dropna()
+    k = df["K"].iloc[-1]
+    d = df["D"].iloc[-1]
 
-        df_d = supertrend(df_d)
-        df_h4 = supertrend(df_h4)
-        df_h1 = supertrend(df_h1)
+    if new_trend:
+        score += 40
 
-        if len(df_h1) < 10:
-            return None
+    if k < 30 and d < 30:
+        score += 30
 
-        if df_d['trend'].iloc[-1] != 1: return None
-        if df_h4['trend'].iloc[-1] != 1: return None
+    if bandar_detect(df):
+        score += 20
 
-        if not (df_h1['trend'].iloc[-2] == -1 and df_h1['trend'].iloc[-1] == 1):
-            return None
+    if df["trend"].iloc[-1] == 1:
+        score += 10
 
-        close = float(df_h1["Close"].iloc[-1])
-        volume = int(df_h1["Volume"].iloc[-1])
-        value = int(close * volume)
+    return score
 
-        avg_vol = df_h1["Volume"].rolling(20).mean().iloc[-1]
-        bandar = "✅ MASUK" if volume > avg_vol * 1.5 else "❌"
+# ===============================
+# TREND
+# ===============================
+def is_new_uptrend(df):
+    return df["trend"].iloc[-2] == -1 and df["trend"].iloc[-1] == 1
 
-        score = 70 + (30 if bandar == "✅ MASUK" else 0)
+def is_uptrend(df):
+    return df["trend"].iloc[-1] == 1
 
-        text = (
-            f"╔══════════════════════╗\n"
-            f"🎯 {symbol}\n"
-            f"╠══════════════════════╣\n"
-            f"💰 Harga   : {round(close,2)}\n"
-            f"📊 Volume  : {volume:,}\n"
-            f"💵 Value   : Rp {value:,}".replace(",", ".") + "\n"
-            f"💰 Bandar  : {bandar}\n"
-            f"🎯 Score   : {score}\n"
-            f"🏷 Label   : 🎯 SNIPER ENTRY\n"
-            f"📈 Chart   : https://stockbit.com/symbol/{symbol.replace('.JK','')}?chart=1\n"
-            f"╚══════════════════════╝"
-        )
+# ===============================
+# FORMAT
+# ===============================
+def format_output(symbol, df, label, score, bandar):
+    close = round(float(df["Close"].iloc[-1]),2)
+    volume = int(df["Volume"].iloc[-1])
+    value = int(close * volume)
 
-        return {"text": text, "score": score}
+    k = df["K"].iloc[-1]
+    d = df["D"].iloc[-1]
 
-    except Exception as e:
-        print(symbol, "sniper error:", e)
+    bandar_txt = "✅ MASUK" if bandar else "❌ SEPI"
+
+    return (
+        f"╔══════════════════════╗\n"
+        f"🎯 {symbol}\n"
+        f"╠══════════════════════╣\n"
+        f"💰 Harga   : {close}\n"
+        f"📊 + Bumbu : {round(k,2)}\n"
+        f"📊 + Bumbu : {round(d,2)}\n"
+        f"📊 Volume  : {volume:,}\n"
+        f"💵 Value   : Rp {value:,}\n"
+        f"💰 Bandar  : {bandar_txt}\n"
+        f"🎯 Score   : {score}\n"
+        f"🏷 Label   : {label}\n"
+        f"📈 Chart   : https://stockbit.com/symbol/{symbol.replace('.JK','')}?chart=1\n"
+        f"╚══════════════════════╝"
+    )
+
+# ===============================
+# MAIN SIGNAL
+# ===============================
+def get_signal(symbol, mode):
+    df = get_data(symbol, "1d")
+    if df is None:
         return None
+
+    new_trend = is_new_uptrend(df)
+    bandar = bandar_detect(df)
+    score = calculate_score(df, new_trend)
+
+    # BUY STRONG
+    if mode == "buy_d":
+        if new_trend and df["K"].iloc[-1] < 30:
+            return format_output(symbol, df, "🔥 SMART MONEY", score, bandar)
+
+    # FAST
+    if mode == "fast_1d":
+        if new_trend:
+            return format_output(symbol, df, "⚡ FAST BUY", score, bandar)
+
+    # WEEKLY
+    if mode == "weekly":
+        if is_uptrend(df):
+            return format_output(symbol, df, "🚀 TREND", score, bandar)
+
+    return None
